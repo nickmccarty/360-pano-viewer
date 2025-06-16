@@ -1,0 +1,321 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>360° Pano Viewer</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.css">
+  <style>
+    html, body {
+      margin: 0;
+      padding: 0;
+      height: 100%;
+      overflow: hidden;
+      font-family: Arial, sans-serif;
+    }
+    .comparison-container {
+      position: relative;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+    }
+    #panoA, #panoB {
+      position: absolute;
+      width: 100%;
+      height: 100%;
+      top: 0;
+      left: 0;
+    }
+    #panoA { z-index: 1; }
+    #panoB { z-index: 2; overflow: hidden; }
+    .slider-container {
+      position: absolute;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 2000;
+      width: 300px;
+      pointer-events: auto;
+      background: rgba(0,0,0,0.5);
+      padding: 10px;
+      border-radius: 20px;
+    }
+    input[type=range] {
+      width: 100%;
+      margin: 0;
+      -webkit-appearance: none;
+      background: rgba(255,255,255,0.3);
+      border-radius: 10px;
+      height: 6px;
+      outline: none;
+    }
+    input[type=range]::-webkit-slider-thumb, input[type=range]::-moz-range-thumb {
+      width: 20px;
+      height: 20px;
+      background: #fff;
+      border-radius: 50%;
+      cursor: col-resize;
+      border: 2px solid #007bff;
+      box-shadow: 0 2px 4px rgba(0,0,0,0.3);
+    }
+    .controls {
+      position: absolute;
+      top: 80px;
+      left: 10px;
+      z-index: 3000;
+      background: rgba(255,255,255,0.95);
+      padding: 15px;
+      border-radius: 8px;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+      min-width: 250px;
+    }
+    .controls input, .controls select, .controls button {
+      margin: 5px 0;
+      width: 100%;
+      padding: 8px;
+      border: 1px solid #ddd;
+      border-radius: 4px;
+      font-size: 14px;
+    }
+    .controls button {
+      background: #007bff;
+      color: white;
+      cursor: pointer;
+      border: none;
+    }
+    .controls button:hover { background: #0056b3; }
+    .image-info { margin: 10px 0; font-size: 12px; color: #666; }
+    .loading {
+      position: absolute;
+      top: 50%;
+      left: 50%;
+      transform: translate(-50%, -50%);
+      z-index: 1000;
+      color: white;
+      background: rgba(0,0,0,0.7);
+      padding: 20px;
+      border-radius: 8px;
+      display: none;
+    }
+  </style>
+</head>
+<body>
+  <div class="comparison-container">
+    <div id="panoA"></div>
+    <div id="panoB"></div>
+
+    <div class="slider-container">
+      <input type="range" min="0" max="100" value="50" id="panoSlider">
+    </div>
+
+    <div class="controls">
+      <input type="file" id="fileInput" multiple accept="image/jpeg, image/png">
+      <div class="image-info" id="imageInfo">Please select panoramic images</div>
+      <select id="imageSelector" disabled>
+        <option>No images loaded</option>
+      </select>
+      <button id="resetBtn" disabled>Reset to Newest</button>
+      <button id="alignBtn" disabled>Align Right to Left View</button>
+    </div>
+
+    <div class="loading" id="loadingIndicator">Loading panoramas...</div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/npm/pannellum@2.5.6/build/pannellum.js"></script>
+  <script>
+    let panoFiles = [], panoURLs = [];
+    let panoA, panoB;
+    let currentOldestIdx = 0, currentCompareIdx = 0;
+
+    const slider = document.getElementById('panoSlider');
+    const fileInput = document.getElementById('fileInput');
+    const selector = document.getElementById('imageSelector');
+    const resetBtn = document.getElementById('resetBtn');
+    const alignBtn = document.getElementById('alignBtn');
+    const imageInfo = document.getElementById('imageInfo');
+    const loadingIndicator = document.getElementById('loadingIndicator');
+
+    function showLoading() { loadingIndicator.style.display = 'block'; }
+    function hideLoading() { loadingIndicator.style.display = 'none'; }
+    function updateImageInfo() {
+      if (!panoFiles.length) {
+        imageInfo.textContent = "Please select panoramic images";
+      } else if (panoFiles.length === 1) {
+        imageInfo.innerHTML = `<strong>Single Image Mode:</strong> ${panoFiles[0].name}`;
+      } else {
+        imageInfo.innerHTML = `
+          <strong>Left (Oldest):</strong> ${panoFiles[currentOldestIdx].name}<br>
+          <strong>Right (Compare):</strong> ${panoFiles[currentCompareIdx].name}
+        `;
+      }
+    }
+
+    function populateSelector() {
+      selector.innerHTML = '';
+      selector.disabled = false;
+      resetBtn.disabled = false;
+      alignBtn.disabled = false;
+      panoFiles.forEach((f, i) => {
+        const o = document.createElement('option');
+        o.value = i;
+        o.textContent = `${i+1}. ${f.name}`;
+        selector.appendChild(o);
+      });
+      updateImageInfo();
+    }
+
+    function initViewers(oldestIdx, compareIdx) {
+        showLoading();
+        currentOldestIdx = oldestIdx;
+        currentCompareIdx = compareIdx;
+
+        if (panoA) panoA.destroy();
+        if (panoB) panoB.destroy();
+
+        setTimeout(() => {
+            const initialView = { yaw: 0, pitch: 0, hfov: 100 };
+
+            panoA = pannellum.viewer('panoA', {
+            type: 'equirectangular',
+            panorama: panoURLs[oldestIdx],
+            autoLoad: true,
+            yaw: initialView.yaw,
+            pitch: initialView.pitch,
+            hfov: initialView.hfov,
+            showControls: false, mouseZoom: false, keyboardZoom: false
+            });
+
+            panoB = pannellum.viewer('panoB', {
+            type: 'equirectangular',
+            panorama: panoURLs[compareIdx],
+            autoLoad: true,
+            yaw: initialView.yaw,
+            pitch: initialView.pitch,
+            hfov: initialView.hfov,
+            showControls: false, mouseZoom: false, keyboardZoom: false
+            });
+
+            document.querySelector('.slider-container').style.display = 'block';
+            resetBtn.style.display = 'block';
+
+            let loaded = 0;
+            const onLoad = () => {
+            loaded++;
+            if (loaded === 2) {
+                const yaw = panoA.getYaw();
+                const pitch = panoA.getPitch();
+                const hfov = panoA.getHfov();
+                panoB.setYaw(yaw);
+                panoB.setPitch(pitch);
+                panoB.setHfov(hfov);
+
+                syncViewers();
+                setTimeout(() => setClip(slider.value), 300);
+                updateImageInfo();
+                hideLoading();
+            }
+            };
+
+            panoA.on('load', onLoad);
+            panoB.on('load', onLoad);
+        }, 100);
+    }
+
+    function initSingleViewer(idx) {
+      showLoading();
+      currentOldestIdx = currentCompareIdx = idx;
+      document.querySelector('.slider-container').style.display = 'none';
+      resetBtn.style.display = 'none';
+      selector.disabled = true;
+      if (panoA) panoA.destroy();
+      if (panoB) panoB.destroy();
+      panoB.style.width = '100%';
+      panoB.style.overflow = 'visible';
+
+      setTimeout(() => {
+        panoA = pannellum.viewer('panoA', {
+          type: 'equirectangular',
+          panorama: panoURLs[idx],
+          autoLoad: true,
+          showControls: true, showZoomCtrl: true, showFullscreenCtrl: true
+        });
+        panoA.on('load', () => {
+          updateImageInfo();
+          hideLoading();
+        });
+      }, 100);
+    }
+
+    function setClip(val) {
+      document.getElementById('panoB').style.width = `${val}%`;
+    }
+
+    function syncViewers() {
+        let syncing = false;
+
+        const sync = (source, target) => {
+            if (syncing) return;
+            syncing = true;
+
+            target.setYaw(source.getYaw());
+            target.setPitch(source.getPitch());
+            target.setHfov(source.getHfov());
+
+            // Prevent rapid updates
+            setTimeout(() => syncing = false, 10);
+        };
+
+        const attachSyncEvents = (viewerA, viewerB) => {
+            viewerA.on('scenechange', () => sync(viewerA, viewerB));
+            viewerA.on('zoomchange', () => sync(viewerA, viewerB));
+            viewerA.on('mousemove', () => sync(viewerA, viewerB));
+            viewerA.on('touchend', () => sync(viewerA, viewerB));
+            viewerA.on('touchmove', () => sync(viewerA, viewerB));
+            viewerA.on('mousedown', () => sync(viewerA, viewerB));
+        };
+
+        attachSyncEvents(panoA, panoB);
+        attachSyncEvents(panoB, panoA); // Bi-directional
+    }
+
+    function handleFiles(files) {
+        if (!files.length) return;
+        showLoading();
+        panoURLs.forEach(u => URL.revokeObjectURL(u));
+        panoFiles = Array.from(files).sort((a, b) => a.name.localeCompare(b.name));
+        panoURLs = panoFiles.map(f => URL.createObjectURL(f));
+        populateSelector();
+
+        if (panoFiles.length > 1) {
+            selector.selectedIndex = panoFiles.length - 1;
+            initViewers(0, panoFiles.length - 1); // this will now auto-align
+        } else {
+            initSingleViewer(0);
+        }
+    }
+
+    function alignRightToLeft() {
+      if (!panoA || !panoB) return;
+      const yaw = panoA.getYaw(), pitch = panoA.getPitch(), hfov = panoA.getHfov();
+      panoB.setYaw(yaw); panoB.setPitch(pitch); panoB.setHfov(hfov);
+    }
+
+    // Event hookups
+    fileInput.addEventListener('change', e => handleFiles(e.target.files));
+    selector.addEventListener('change', e => {
+      const i = +e.target.value;
+      if (panoFiles.length === 1) initSingleViewer(i);
+      else initViewers(0, i);
+    });
+    resetBtn.addEventListener('click', () => {
+      selector.selectedIndex = panoFiles.length - 1;
+      initViewers(0, panoFiles.length - 1);
+    });
+    alignBtn.addEventListener('click', alignRightToLeft);
+    slider.addEventListener('input', e => setClip(e.target.value));
+
+    window.addEventListener('beforeunload', () => {
+      panoURLs.forEach(u => URL.revokeObjectURL(u));
+    });
+  </script>
+</body>
+</html>
