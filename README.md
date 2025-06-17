@@ -1,4 +1,4 @@
-[![](https://img.shields.io/static/v1?label=View%20Demo%20Site&message=link&labelColor=2f363d&color=blue&style=flat&logo=github&logoColor=959da5)](https://nickmccarty.me/360-pano-viewer)
+[![](https://img.shields.io/static/v1?label=Live%20Demo&message=✨&labelColor=2f363d&color=blue&style=flat&logo=github&logoColor=959da5)](https://nickmccarty.me/360-pano-viewer)
 
 # 📜 Panorama Viewer Comparison Tool
 
