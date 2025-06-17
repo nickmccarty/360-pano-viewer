@@ -1,3 +1,5 @@
+[![](https://img.shields.io/static/v1?label=View%20Demo%20Site&message=link&labelColor=2f363d&color=blue&style=flat&logo=github&logoColor=959da5)](https://nickmccarty.me/360-pano-viewer)
+
 # 📜 Panorama Viewer Comparison Tool
 
 This web app prototype enables interactive comparison between one or two 360° panoramic images using the [Pannellum](https://pannellum.org) viewer library. It provides a slider-based split view for visual comparison and synchronizes the camera angles between two viewers.
