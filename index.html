@@ -36,6 +36,10 @@
       background: rgba(0,0,0,0.5);
       padding: 10px;
       border-radius: 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      align-items: center;
     }
     input[type="range"] {
       width: 100%;
@@ -58,13 +62,79 @@
       border-radius: 10px;
       display: none;
     }
+    .controls-row {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+    }
+    .zoom-controls {
+      display: flex;
+      gap: 2px;
+      align-items: center;
+    }
+    .zoom-controls button {
+      width: 30px;
+      height: 30px;
+      font-size: 18px;
+      border-radius: 6px;
+      border: none;
+      background: #222;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    .zoom-controls button:hover {
+      background: #444;
+    }
+    #syncToggle {
+      padding: 6px 16px;
+      border-radius: 6px;
+      border: none;
+      background: #007bff;
+      color: #fff;
+      font-weight: bold;
+      cursor: pointer;
+      transition: background 0.2s;
+    }
+    #syncToggle.manual {
+      background: #e67e22;
+    }
+    #syncStatus {
+      color: #fff;
+      font-weight: bold;
+      margin-left: 8px;
+      font-size: 1em;
+      letter-spacing: 1px;
+      text-shadow: 1px 1px 3px #000;
+    }
+    @media (max-width: 600px) {
+      #sliderContainer { width: 90vw; }
+      .zoom-controls button { width: 24px; height: 24px; font-size: 14px; }
+      #syncToggle { font-size: 0.9em; }
+    }
   </style>
 </head>
 <body>
   <div class="comparison-container">
     <div id="panoA"></div>
     <div id="panoB"></div>
-    <div id="sliderContainer"><input type="range" id="slider" min="0" max="100" value="50"></div>
+    <div id="sliderContainer">
+      <input type="range" id="slider" min="0" max="100" value="50">
+      <div class="controls-row">
+        <div class="zoom-controls" id="zoomA">
+          <button id="zoomBOut" title="Zoom Out Left">-</button>
+          <span style="color:#fff;">A</span>
+          <button id="zoomBIn" title="Zoom In Left">+</button>
+        </div>
+        <button id="syncToggle" title="Toggle manual override">Manual Override: Off</button>
+        <span id="syncStatus">SYNCED</span>
+        <div class="zoom-controls" id="zoomB">
+          <button id="zoomAOut" title="Zoom Out Right">-</button>
+          <span style="color:#fff;">B</span>
+          <button id="zoomAIn" title="Zoom In Right">+</button>
+        </div>
+      </div>
+    </div>
     <input type="file" id="fileInput" multiple accept="image/*">
     <div id="loading">Loading panoramas...</div>
   </div>
@@ -76,8 +146,18 @@
     const panoAContainer = document.getElementById('panoA');
     const panoBContainer = document.getElementById('panoB');
     const loading = document.getElementById('loading');
+    const syncToggle = document.getElementById('syncToggle');
+    const syncStatus = document.getElementById('syncStatus');
+    const zoomAIn = document.getElementById('zoomAIn');
+    const zoomAOut = document.getElementById('zoomAOut');
+    const zoomBIn = document.getElementById('zoomBIn');
+    const zoomBOut = document.getElementById('zoomBOut');
+    const zoomAControls = document.getElementById('zoomA');
+    const zoomBControls = document.getElementById('zoomB');
 
     let panoA, panoB, urls = [];
+    let syncEnabled = true;
+    let panoAEvents = [], panoBEvents = [];
 
     function showLoading(state) {
       loading.style.display = state ? 'block' : 'none';
@@ -87,10 +167,23 @@
       panoBContainer.style.width = `${val}%`;
     }
 
+    function clearViewerEvents() {
+      // Remove all event listeners from previous viewers
+      if (panoA && panoAEvents.length) {
+        panoAEvents.forEach(([evt, fn]) => panoA.off(evt, fn));
+        panoAEvents = [];
+      }
+      if (panoB && panoBEvents.length) {
+        panoBEvents.forEach(([evt, fn]) => panoB.off(evt, fn));
+        panoBEvents = [];
+      }
+    }
+
     function syncViewers() {
+      clearViewerEvents();
       let syncing = false;
       const sync = (source, target) => {
-        if (syncing) return;
+        if (!syncEnabled || syncing) return;
         syncing = true;
         target.setYaw(source.getYaw());
         target.setPitch(source.getPitch());
@@ -98,16 +191,49 @@
         setTimeout(() => syncing = false, 10);
       };
 
-      [ [panoA, panoB], [panoB, panoA] ].forEach(([a, b]) => {
-        ['load', 'zoomchange', 'mousemove', 'touchmove', 'mousedown'].forEach(evt =>
-          a.on(evt, () => sync(a, b))
-        );
-      });
+      // Only add event listeners if sync is enabled
+      if (syncEnabled) {
+        [
+          [panoA, panoB, panoAEvents],
+          [panoB, panoA, panoBEvents]
+        ].forEach(([a, b, eventArr]) => {
+          ['load', 'zoomchange', 'mousemove', 'touchmove', 'mousedown'].forEach(evt => {
+            const fn = () => sync(a, b);
+            a.on(evt, fn);
+            eventArr.push([evt, fn]);
+          });
+        });
+      }
+    }
+
+    function updateSyncUI() {
+      if (syncEnabled) {
+        syncToggle.textContent = "Manual Override: Off";
+        syncToggle.classList.remove('manual');
+        syncStatus.textContent = "SYNCED";
+        syncStatus.style.color = "#5fff5f";
+        // Both zoom controls enabled
+        zoomAIn.disabled = zoomAOut.disabled = false;
+        zoomBIn.disabled = zoomBOut.disabled = false;
+        zoomAIn.title = zoomAOut.title = "Zoom left (sync)";
+        zoomBIn.title = zoomBOut.title = "Zoom right (sync)";
+      } else {
+        syncToggle.textContent = "Manual Override: On";
+        syncToggle.classList.add('manual');
+        syncStatus.textContent = "MANUAL";
+        syncStatus.style.color = "#ffd166";
+        // Both zoom controls enabled
+        zoomAIn.disabled = zoomAOut.disabled = false;
+        zoomBIn.disabled = zoomBOut.disabled = false;
+        zoomAIn.title = zoomAOut.title = "Zoom left only";
+        zoomBIn.title = zoomBOut.title = "Zoom right only";
+      }
     }
 
     function loadPanoramas([img1, img2]) {
       if (panoA) panoA.destroy();
       if (panoB) panoB.destroy();
+      clearViewerEvents();
 
       showLoading(true);
 
@@ -141,6 +267,7 @@
           panoB.setHfov(panoA.getHfov());
           setClip(slider.value);
           syncViewers();
+          updateSyncUI();
           showLoading(false);
         }
       };
@@ -157,6 +284,9 @@
       urls = files.map(f => URL.createObjectURL(f));
 
       if (urls.length === 1) {
+        if (panoA) panoA.destroy();
+        if (panoB) panoB.destroy();
+        clearViewerEvents();
         panoA = pannellum.viewer('panoA', {
           type: 'equirectangular',
           panorama: urls[0],
@@ -167,13 +297,70 @@
         document.getElementById('sliderContainer').style.display = 'none';
       } else {
         panoBContainer.style.display = 'block';
-        document.getElementById('sliderContainer').style.display = 'block';
+        document.getElementById('sliderContainer').style.display = 'flex';
         loadPanoramas(urls);
       }
     });
 
     slider.addEventListener('input', e => setClip(e.target.value));
+
+    // Zoom controls
+    function clampHfov(hfov) {
+      return Math.max(30, Math.min(120, hfov));
+    }
+    function getActiveViewers() {
+      if (!panoA || !panoB) return [];
+      return syncEnabled ? [panoA, panoB] : null;
+    }
+    zoomAIn.addEventListener('click', () => {
+      if (syncEnabled) {
+        let newHfov = clampHfov(panoA.getHfov() - 10);
+        panoA.setHfov(newHfov);
+        panoB.setHfov(newHfov);
+      } else {
+        panoA.setHfov(clampHfov(panoA.getHfov() - 10));
+      }
+    });
+    zoomAOut.addEventListener('click', () => {
+      if (syncEnabled) {
+        let newHfov = clampHfov(panoA.getHfov() + 10);
+        panoA.setHfov(newHfov);
+        panoB.setHfov(newHfov);
+      } else {
+        panoA.setHfov(clampHfov(panoA.getHfov() + 10));
+      }
+    });
+
+    zoomBIn.addEventListener('click', () => {
+      if (syncEnabled) {
+        let newHfov = clampHfov(panoB.getHfov() - 10);
+        panoA.setHfov(newHfov);
+        panoB.setHfov(newHfov);
+      } else {
+        panoB.setHfov(clampHfov(panoB.getHfov() - 10));
+      }
+    });
+    zoomBOut.addEventListener('click', () => {
+      if (syncEnabled) {
+        let newHfov = clampHfov(panoB.getHfov() + 10);
+        panoA.setHfov(newHfov);
+        panoB.setHfov(newHfov);
+      } else {
+        panoB.setHfov(clampHfov(panoB.getHfov() + 10));
+      }
+    });
+
+    // Manual override toggle
+    syncToggle.addEventListener('click', () => {
+      syncEnabled = !syncEnabled;
+      syncViewers();
+      updateSyncUI();
+    });
+
     window.addEventListener('beforeunload', () => urls.forEach(u => URL.revokeObjectURL(u)));
+
+    // Initial UI state
+    updateSyncUI();
   </script>
 </body>
 </html>
